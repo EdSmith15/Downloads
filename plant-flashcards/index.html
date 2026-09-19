@@ -793,7 +793,12 @@
   var photoIndex = null;
   function getPhotoIndex() {
     if (!photoIndex) {
-      photoIndex = (typeof fetch === 'function' ? fetch('photos/index.json').then(function (r) { return r.ok ? r.json() : {}; }) : Promise.resolve({}))
+      var request = typeof fetch === 'function'
+        ? fetch('photos/index.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : {}; })
+        : Promise.resolve({});
+      var timeout = new Promise(function (resolve) { setTimeout(function () { resolve({}); }, 2500); });
+      photoIndex = Promise.race([request, timeout])
+        .then(function (idx) { return idx && typeof idx === 'object' && !Array.isArray(idx) ? idx : {}; })
         .catch(function () { return {}; });
     }
     return photoIndex;
