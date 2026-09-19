@@ -169,7 +169,27 @@
     line-height: 1.1;
     text-wrap: balance;
   }
-  .photo { max-width: 100%; border-radius: 10px; max-height: 180px; object-fit: cover; }
+  .photo-wrap { display: flex; flex-direction: column; gap: 6px; }
+  .photo {
+    display: block; width: 100%; max-width: 100%;
+    aspect-ratio: 16 / 9; max-height: 22vh; object-fit: cover;
+    border-radius: 12px; background: var(--moss-soft); cursor: zoom-in;
+  }
+  .lightbox {
+    position: fixed; inset: 0; z-index: 30; background: var(--overlay);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+    cursor: zoom-out;
+  }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; object-fit: contain; }
+  .thumbs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+  .thumbs img {
+    flex: 0 0 auto; width: 40px; height: 40px; object-fit: cover;
+    border-radius: 6px; border: 2px solid transparent; cursor: pointer;
+    background: var(--moss-soft);
+  }
+  .thumbs img[aria-current="true"] { border-color: var(--moss); }
+  .credit { font-size: 11px; color: var(--ink-2); }
+  .credit a { color: inherit; }
   .hint { margin: 0; font-size: 14px; color: var(--ink-2); }
 
   .answer {
@@ -569,15 +589,19 @@
     var c = state.current;
     cardEl.innerHTML = '';
     cardEl.appendChild(el('p', 'eyebrow', c.family || 'Plant'));
+    var pw = el('div', 'photo-wrap'); pw.hidden = true;
+    var img = el('img', 'photo'); img.alt = c.common || key(c);
+    img.addEventListener('click', function () {
+      var lb = el('div', 'lightbox'); var big = el('img'); big.src = img.src; big.alt = img.alt;
+      lb.appendChild(big); lb.addEventListener('click', function () { lb.remove(); });
+      document.body.appendChild(lb);
+    });
+    var thumbs = el('div', 'thumbs');
+    var credit = el('div', 'credit');
+    pw.appendChild(img); pw.appendChild(thumbs); pw.appendChild(credit);
+    cardEl.appendChild(pw);
+    loadPhotos(c, pw, img, thumbs, credit);
     cardEl.appendChild(el('h1', 'common', c.common || '(no common name given)'));
-    if (c.image) {
-      var img = el('img', 'photo');
-      img.alt = c.common || key(c);
-      img.hidden = true;
-      img.onload = function () { img.hidden = false; };
-      img.src = c.image;
-      cardEl.appendChild(img);
-    }
     cardEl.appendChild(el('p', 'hint', hintText()));
 
     var ans = el('div', 'answer'); ans.id = 'answer';
@@ -617,6 +641,97 @@
     cardEl.appendChild(actions);
 
     paintCells();
+  }
+
+  // ------------------------------------------------------------------
+  // Photos. Order tried: URL given in the deck, then photos/<genus>-<species>.jpg
+  // next to this file (see tools/fetch_photos.py), then the images on the
+  // species' Wikipedia article, fetched live and cached on this device.
+  // ------------------------------------------------------------------
+  var photoToken = 0;
+  var WIKI_MEDIA = 'https://en.wikipedia.org/api/rest_v1/page/media-list/';
+
+  function slug(c) { return (c.genus + '-' + c.species).toLowerCase().replace(/[^a-z]+/g, '-'); }
+
+  function loadPhotos(c, wrap, img, thumbs, credit) {
+    var token = ++photoToken;
+    var candidates = [];
+    if (c.image) candidates.push(c.image);
+    candidates.push('photos/' + slug(c) + '.jpg');
+    tryLocal();
+
+    function tryLocal() {
+      if (token !== photoToken) return;
+      var src = candidates.shift();
+      if (!src) { fromWikipedia(); return; }
+      var probe = new Image();
+      probe.onload = function () { show([{ src: src, page: null }]); };
+      probe.onerror = tryLocal;
+      probe.src = src;
+    }
+
+    function fromWikipedia() {
+      var cacheKey = 'binomial-drill.photos.' + key(c);
+      var cached = load(cacheKey);
+      if (cached) {
+        try { var arr = JSON.parse(cached); if (arr.length) { show(arr); return; } } catch (e) { /* refetch */ }
+      }
+      if (typeof fetch !== 'function') return;
+      var title = encodeURIComponent(key(c).replace(/ /g, '_'));
+      fetch(WIKI_MEDIA + title)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || token !== photoToken) return;
+          var items = (d.items || []).filter(function (it) {
+            if (it.type !== 'image' || !it.srcset || !it.srcset.length) return false;
+            var t = it.title || '';
+            if (/\.(svg|gif|png)$/i.test(t)) return false;
+            if (/map|status|icon|logo|distribution|range|commons|wiki|question|edit|symbol/i.test(t)) return false;
+            return true;
+          });
+          items.sort(function (a, b) { return (b.leadImage ? 1 : 0) - (a.leadImage ? 1 : 0); });
+          items = items.slice(0, 5).map(function (it) {
+            var src = it.srcset[0].src;
+            if (src.indexOf('//') === 0) src = 'https:' + src;
+            src = src.replace(/\/\d+px-/, '/640px-');
+            return { src: src, page: 'https://commons.wikimedia.org/wiki/' + encodeURIComponent(it.title) };
+          });
+          if (!items.length) return;
+          save(cacheKey, JSON.stringify(items));
+          show(items);
+        })
+        .catch(function () { /* offline or blocked: card simply has no photo */ });
+    }
+
+    function show(list) {
+      if (token !== photoToken) return;
+      var current = 0;
+      thumbs.innerHTML = '';
+      if (list.length > 1) {
+        list.forEach(function (it, n) {
+          var t = el('img'); t.src = it.src; t.alt = ''; t.loading = 'lazy';
+          t.addEventListener('click', function () { pick(n); });
+          thumbs.appendChild(t);
+        });
+      }
+      img.onload = function () { if (token === photoToken) wrap.hidden = false; };
+      img.onerror = function () { if (current + 1 < list.length) pick(current + 1); };
+      pick(0);
+
+      function pick(n) {
+        current = n;
+        img.src = list[n].src;
+        credit.innerHTML = '';
+        if (list[n].page) {
+          var a = el('a', null, 'Photo: Wikimedia Commons');
+          a.href = list[n].page; a.target = '_blank'; a.rel = 'noopener';
+          credit.appendChild(a);
+        }
+        Array.prototype.forEach.call(thumbs.children, function (t, k) {
+          t.setAttribute('aria-current', k === n ? 'true' : 'false');
+        });
+      }
+    }
   }
 
   function paintCells() {

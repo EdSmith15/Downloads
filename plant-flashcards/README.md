@@ -26,3 +26,24 @@ Genus species | Common name | Family | https://example.com/optional-photo.jpg
 Family and photo are optional. The deck is saved in the browser on that device.
 The sample deck of 32 common UK plants is there as a placeholder; replace it with
 your list.
+
+## Photos
+
+Each card shows an identifying photo above the common name. The app looks for
+one in this order:
+
+1. A photo URL given as the fourth field of the deck line.
+2. `photos/<genus>-<species>.jpg` next to `index.html`.
+3. The images on the species' English Wikipedia article, fetched live from
+   Wikimedia and cached in the browser. The lead (taxobox) photo is shown first
+   and up to four more from the article appear as thumbnails to tap through.
+
+To keep photos with the repo for offline use, run:
+
+```
+python3 tools/fetch_photos.py
+```
+
+It saves an 800px copy of each lead photo into `photos/` and lists the source,
+author and licence in `photos/CREDITS.md`. Pass a deck file as the first
+argument to fetch photos for your own list.
